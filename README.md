@@ -32,6 +32,7 @@
 - 一张用于存放 StackChan 配置文件的 Micro SD Card
 - 一部可提供 2.4 GHz 兼容热点的手机
 - 一个支持远程 Streamable HTTP MCP 的 AI 客户端或宿主
+- 一个可通过 HTTPS 访问的 MCP 地址（推荐使用域名 + Nginx + Let's Encrypt）
 
 ## 架构
 
