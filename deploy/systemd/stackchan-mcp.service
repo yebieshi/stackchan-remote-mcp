@@ -1,0 +1,17 @@
+[Unit]
+Description=StackChan Remote MCP
+After=network-online.target mosquitto.service stackchan-relay.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stackchan
+Group=stackchan
+WorkingDirectory=/opt/stackchan-remote-mcp/server
+EnvironmentFile=/etc/stackchan-remote-mcp.env
+ExecStart=/opt/stackchan-remote-mcp/.venv/bin/python /opt/stackchan-remote-mcp/server/stackchan_remote_mcp.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
