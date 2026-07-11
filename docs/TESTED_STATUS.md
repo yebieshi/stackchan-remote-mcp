@@ -31,3 +31,19 @@ Verified:
 - Remote expression changes succeed.
 - Remote photo capture and image return succeed.
 
+## v0.1.1 repeated-capture fix
+
+A repeated-photo timeout was reproduced even though the device log showed both
+`frame acquired` and `uploaded ... -> relay OK`. The cause was stale/new-photo
+detection at the relay/MCP layer, not camera capture.
+
+The fix adds:
+
+- A monotonically increasing `X-Photo-Version` header for every upload.
+- Nanosecond file modification time as additional metadata.
+- Cache-busting requests and SHA-256 image-content comparison in the MCP server.
+- A 15-second polling window for the new photo.
+- Short camera frame-acquisition retries while keeping the preview subwindow enabled.
+
+After the fix, three consecutive remote photo captures returned three distinct
+images successfully.

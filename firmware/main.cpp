@@ -331,9 +331,26 @@ void mqttReconnect() {
 // 拍一张照片并 POST 到 VPS 中转服务
 void captureAndUpload() {
   M5.In_I2C.release();
-  camera_fb_t *fb = esp_camera_fb_get();
+
+  // The camera preview may briefly hold a frame buffer. Retry for a short
+  // period instead of failing the remote capture after a single attempt.
+  camera_fb_t *fb = nullptr;
+  const int maxAttempts = 20;
+
+  for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+    fb = esp_camera_fb_get();
+    if (fb) {
+      Serial.printf("[CAM] frame acquired on attempt %d/%d\n", attempt, maxAttempts);
+      break;
+    }
+
+    Serial.printf("[CAM] frame unavailable, retry %d/%d\n", attempt, maxAttempts);
+    delay(100);
+    yield();
+  }
+
   if (!fb) {
-    Serial.println("[CAM] capture failed");
+    Serial.println("[CAM] capture failed after retries");
     return;
   }
 

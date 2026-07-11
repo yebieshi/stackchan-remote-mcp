@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 
@@ -47,6 +48,18 @@ def _mqtt_pub(topic: str, payload: str) -> None:
     )
 
 
+def _get_latest_photo() -> requests.Response:
+    return requests.get(
+        f"{RELAY_URL}/latest.jpg",
+        headers={
+            "X-Relay-Token": RELAY_TOKEN,
+            "Cache-Control": "no-cache",
+        },
+        params={"_": time.time_ns()},
+        timeout=5,
+    )
+
+
 @mcp.tool()
 def stackchan_face(expression: str) -> str:
     """Change StackChan's expression: neutral, happy, sleepy, doubt, sad, or angry."""
@@ -61,41 +74,49 @@ def stackchan_face(expression: str) -> str:
 @mcp.tool()
 def stackchan_see() -> Image:
     """Trigger a photo capture and return the newest JPEG image."""
-    headers = {"X-Relay-Token": RELAY_TOKEN}
+    old_version = None
+    old_hash = None
 
-    old_mtime = None
     try:
-        previous = requests.get(
-            f"{RELAY_URL}/latest.jpg",
-            headers=headers,
-            timeout=5,
-        )
+        previous = _get_latest_photo()
         if previous.status_code == 200:
-            old_mtime = previous.headers.get("X-Photo-Mtime")
+            old_version = previous.headers.get("X-Photo-Version")
+            old_hash = hashlib.sha256(previous.content).digest()
     except requests.RequestException:
         pass
 
     _mqtt_pub(MQTT_TOPIC_CAPTURE, "1")
 
-    for _ in range(16):
-        time.sleep(0.5)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
         try:
-            response = requests.get(
-                f"{RELAY_URL}/latest.jpg",
-                headers=headers,
-                timeout=5,
-            )
+            response = _get_latest_photo()
         except requests.RequestException:
             continue
 
-        if response.status_code == 200:
-            new_mtime = response.headers.get("X-Photo-Mtime")
-            if new_mtime != old_mtime:
-                return Image(data=response.content, format="jpeg")
+        if response.status_code != 200:
+            continue
+
+        new_version = response.headers.get("X-Photo-Version")
+        new_hash = hashlib.sha256(response.content).digest()
+
+        version_changed = (
+            new_version is not None
+            and new_version != old_version
+        )
+        content_changed = (
+            old_hash is not None
+            and new_hash != old_hash
+        )
+        first_photo_arrived = old_hash is None and bool(response.content)
+
+        if version_changed or content_changed or first_photo_arrived:
+            return Image(data=response.content, format="jpeg")
 
     raise TimeoutError(
         "Timed out waiting for a new photo. "
-        "Check StackChan Wi-Fi, MQTT, camera, and relay logs."
+        "Check StackChan Wi-Fi, MQTT, camera, relay logs, and relay version headers."
     )
 
 

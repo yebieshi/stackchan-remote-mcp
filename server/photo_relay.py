@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,9 +28,12 @@ SAVE_DIR = Path(_env("STACKCHAN_RELAY_SAVE_DIR", default_save_dir))
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 LATEST_PATH = SAVE_DIR / "latest.jpg"
 
+PHOTO_VERSION = 0
+PHOTO_VERSION_LOCK = threading.Lock()
+
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "StackChanPhotoRelay/0.1"
+    server_version = "StackChanPhotoRelay/0.1.1"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(
@@ -63,9 +67,18 @@ class Handler(BaseHTTPRequestHandler):
         temporary_path.write_bytes(data)
         os.replace(temporary_path, LATEST_PATH)
 
-        print(f"[{time.strftime('%H:%M:%S')}] saved {LATEST_PATH} ({len(data)} bytes)")
+        global PHOTO_VERSION
+        with PHOTO_VERSION_LOCK:
+            PHOTO_VERSION += 1
+            photo_version = PHOTO_VERSION
+
+        print(
+            f"[{time.strftime('%H:%M:%S')}] saved {LATEST_PATH} "
+            f"({len(data)} bytes, version={photo_version})"
+        )
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("X-Photo-Version", str(photo_version))
         self.end_headers()
         self.wfile.write(b"OK")
 
@@ -81,10 +94,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             data = LATEST_PATH.read_bytes()
+            with PHOTO_VERSION_LOCK:
+                photo_version = PHOTO_VERSION
+
             self.send_response(200)
             self.send_header("Content-Type", "image/jpeg")
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("X-Photo-Version", str(photo_version))
             self.send_header("X-Photo-Mtime", str(LATEST_PATH.stat().st_mtime_ns))
             self.end_headers()
             self.wfile.write(data)
