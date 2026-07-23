@@ -42,6 +42,7 @@
 
 #include "driver/PlayMP3.h"   //lipSync
 #include "driver/TapDetect.h"
+#include "driver/HeadTouchSensor.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -66,6 +67,25 @@
 #include "DebugTools.h"
 #include "RemoteConfig.h"
 
+#ifndef STACKCHAN_MQTT_TOPIC_TOUCH
+#define STACKCHAN_MQTT_TOPIC_TOUCH "stackchan/touch"
+#endif
+
+#ifndef STACKCHAN_TOUCH_ZONE_X_MIN
+#define STACKCHAN_TOUCH_ZONE_X_MIN 0
+#define STACKCHAN_TOUCH_ZONE_X_MAX 319
+#define STACKCHAN_TOUCH_ZONE_Y_MIN 0
+#define STACKCHAN_TOUCH_ZONE_Y_MAX 191
+#endif
+
+#ifndef STACKCHAN_TOUCH_STROKE_DISTANCE_PX
+#define STACKCHAN_TOUCH_STROKE_DISTANCE_PX 24
+#endif
+
+#ifndef STACKCHAN_TOUCH_PRESS_MS
+#define STACKCHAN_TOUCH_PRESS_MS 800
+#endif
+
 #if defined(USE_AUDIO_MODULE)
 #include "driver/M5AudioModule.h"
 #endif
@@ -83,6 +103,7 @@ const char*    MQTT_USER          = STACKCHAN_MQTT_USER;
 const char*    MQTT_PASS          = STACKCHAN_MQTT_PASS;
 const char*    MQTT_TOPIC_FACE    = STACKCHAN_MQTT_TOPIC_FACE;
 const char*    MQTT_TOPIC_CAPTURE = STACKCHAN_MQTT_TOPIC_CAPTURE;
+const char*    MQTT_TOPIC_TOUCH   = STACKCHAN_MQTT_TOPIC_TOUCH;
 const char*    MQTT_CLIENT_ID     = STACKCHAN_MQTT_CLIENT_ID;
 
 // 照片上传到 VPS 中转服务（photo_relay.py）
@@ -107,6 +128,7 @@ volatile bool espnow_remote_servo_override = false;
 using namespace m5avatar;
 Avatar avatar;
 Face* customFace;
+Expression remoteExpression = Expression::Neutral;
 const Expression expressions_table[] = {
   Expression::Neutral,
   Expression::Happy,
@@ -115,6 +137,32 @@ const Expression expressions_table[] = {
   Expression::Sad,
   Expression::Angry
 };
+
+struct TouchBridgeState {
+  bool active = false;
+  uint32_t startedAt = 0;
+  int16_t startX = 0;
+  int16_t startY = 0;
+  int16_t endX = 0;
+  int16_t endY = 0;
+};
+
+struct HeadTouchBridgeState {
+  bool active = false;
+  bool swiped = false;
+  uint32_t startedAt = 0;
+  const char* direction = nullptr;
+};
+
+TouchBridgeState screenTouchBridge;
+HeadTouchBridgeState headTouchBridge;
+uint32_t touchBootId = 0;
+uint32_t touchSequence = 0;
+
+const size_t TOUCH_EVENT_QUEUE_SIZE = 8;
+String touchEventQueue[TOUCH_EVENT_QUEUE_SIZE];
+size_t touchEventQueueHead = 0;
+size_t touchEventQueueCount = 0;
 
 FtpServer ftpSrv;   //set #define FTP_DEBUG in ESP8266FtpServer.h to see ftp verbose on serial
 
@@ -277,26 +325,252 @@ void time_sync(const char* ntpsrv, long gmt_offset, int daylight_offset) {
 void captureAndUpload();  // 前向声明，实体在 mqttReconnect 之后
 #endif
 
+bool expressionFromName(const String& raw, Expression& expression) {
+  String n = raw;
+  n.trim();
+  n.toLowerCase();
+  if      (n == "neutral") expression = Expression::Neutral;
+  else if (n == "happy")   expression = Expression::Happy;
+  else if (n == "sleepy")  expression = Expression::Sleepy;
+  else if (n == "doubt")   expression = Expression::Doubt;
+  else if (n == "sad")     expression = Expression::Sad;
+  else if (n == "angry")   expression = Expression::Angry;
+  else return false;
+  return true;
+}
+
 void setFaceByName(const String& raw) {
   String n = raw;
   n.trim();
   n.toLowerCase();
-  if      (n == "neutral") avatar.setExpression(Expression::Neutral);
-  else if (n == "happy")   avatar.setExpression(Expression::Happy);
-  else if (n == "sleepy")  avatar.setExpression(Expression::Sleepy);
-  else if (n == "doubt")   avatar.setExpression(Expression::Doubt);
-  else if (n == "sad")     avatar.setExpression(Expression::Sad);
-  else if (n == "angry")   avatar.setExpression(Expression::Angry);
-  else {
+  Expression requestedExpression;
+  if (!expressionFromName(n, requestedExpression)) {
     // 也接受数字 0-5（对应 expressions_table 顺序）
     int idx = n.toInt();
     int total = sizeof(expressions_table) / sizeof(expressions_table[0]);
     if (idx >= 0 && idx < total) {
-      avatar.setExpression(expressions_table[idx]);
+      requestedExpression = expressions_table[idx];
     } else {
       Serial.printf("[MQTT] unknown face: %s\n", raw.c_str());
+      return;
     }
   }
+
+  remoteExpression = requestedExpression;
+  avatar.setExpression(remoteExpression);
+}
+
+bool pointInTouchBridgeZone(int16_t x, int16_t y) {
+  return (
+    x >= STACKCHAN_TOUCH_ZONE_X_MIN
+    && x <= STACKCHAN_TOUCH_ZONE_X_MAX
+    && y >= STACKCHAN_TOUCH_ZONE_Y_MIN
+    && y <= STACKCHAN_TOUCH_ZONE_Y_MAX
+  );
+}
+
+void enqueueTouchEvent(const String& payload) {
+  if (touchEventQueueCount == TOUCH_EVENT_QUEUE_SIZE) {
+    touchEventQueueHead = (touchEventQueueHead + 1) % TOUCH_EVENT_QUEUE_SIZE;
+    touchEventQueueCount--;
+    Serial.println("[TOUCH] queue full; dropped oldest pending event");
+  }
+
+  size_t tail = (
+    touchEventQueueHead + touchEventQueueCount
+  ) % TOUCH_EVENT_QUEUE_SIZE;
+  touchEventQueue[tail] = payload;
+  touchEventQueueCount++;
+}
+
+void flushTouchEventQueue() {
+  if (!mqttClient.connected() || touchEventQueueCount == 0) {
+    return;
+  }
+
+  String& payload = touchEventQueue[touchEventQueueHead];
+  if (mqttClient.publish(MQTT_TOPIC_TOUCH, payload.c_str())) {
+    Serial.printf("[TOUCH] published: %s\n", payload.c_str());
+    payload = "";
+    touchEventQueueHead = (
+      touchEventQueueHead + 1
+    ) % TOUCH_EVENT_QUEUE_SIZE;
+    touchEventQueueCount--;
+  }
+}
+
+String utcTimestamp() {
+  time_t now = time(nullptr);
+  if (now < 1600000000) {
+    return "";
+  }
+
+  struct tm timeInfo;
+  gmtime_r(&now, &timeInfo);
+  char timestamp[24];
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &timeInfo);
+  return String(timestamp);
+}
+
+void queueTouchEvent(
+  const char* zone,
+  const char* gesture,
+  uint32_t durationMs,
+  const char* direction = nullptr,
+  bool includeCoordinates = false,
+  int16_t startX = 0,
+  int16_t startY = 0,
+  int16_t endX = 0,
+  int16_t endY = 0
+) {
+  touchSequence++;
+  char sourceEventId[96];
+  snprintf(
+    sourceEventId,
+    sizeof(sourceEventId),
+    "%s-%08lx-%lu",
+    MQTT_CLIENT_ID,
+    (unsigned long)touchBootId,
+    (unsigned long)touchSequence
+  );
+
+  JsonDocument doc;
+  doc["event"] = "touch";
+  doc["device"] = MQTT_CLIENT_ID;
+  doc["zone"] = zone;
+  doc["gesture"] = gesture;
+  doc["duration_ms"] = durationMs;
+  if (direction != nullptr && direction[0] != '\0') {
+    doc["direction"] = direction;
+  }
+  if (includeCoordinates) {
+    doc["x_start"] = startX;
+    doc["y_start"] = startY;
+    doc["x_end"] = endX;
+    doc["y_end"] = endY;
+  }
+  doc["source_event_id"] = sourceEventId;
+  String timestamp = utcTimestamp();
+  if (timestamp.length()) {
+    doc["timestamp"] = timestamp;
+  }
+
+  String payload;
+  serializeJson(doc, payload);
+  enqueueTouchEvent(payload);
+}
+
+void finishScreenTouchBridge(int16_t endX, int16_t endY) {
+  screenTouchBridge.endX = endX;
+  screenTouchBridge.endY = endY;
+
+  uint32_t durationMs = millis() - screenTouchBridge.startedAt;
+  int32_t dx = (int32_t)screenTouchBridge.endX - screenTouchBridge.startX;
+  int32_t dy = (int32_t)screenTouchBridge.endY - screenTouchBridge.startY;
+  int32_t distanceSquared = dx * dx + dy * dy;
+  int32_t strokeThresholdSquared = (
+    STACKCHAN_TOUCH_STROKE_DISTANCE_PX
+    * STACKCHAN_TOUCH_STROKE_DISTANCE_PX
+  );
+
+  const char* gesture = "tap";
+  if (distanceSquared >= strokeThresholdSquared) {
+    gesture = "stroke";
+  } else if (durationMs >= STACKCHAN_TOUCH_PRESS_MS) {
+    gesture = "press";
+  }
+
+  queueTouchEvent(
+    "head_front",
+    gesture,
+    durationMs,
+    nullptr,
+    true,
+    screenTouchBridge.startX,
+    screenTouchBridge.startY,
+    screenTouchBridge.endX,
+    screenTouchBridge.endY
+  );
+  screenTouchBridge.active = false;
+}
+
+bool handleTouchBridge(const m5::Touch_Class::touch_detail_t& touch) {
+  if (touch.wasPressed()) {
+    if (!pointInTouchBridgeZone(touch.x, touch.y)) {
+      return false;
+    }
+
+    screenTouchBridge.active = true;
+    screenTouchBridge.startedAt = millis();
+    screenTouchBridge.startX = touch.x;
+    screenTouchBridge.startY = touch.y;
+    screenTouchBridge.endX = touch.x;
+    screenTouchBridge.endY = touch.y;
+    return true;
+  }
+
+  if (!screenTouchBridge.active) {
+    return false;
+  }
+
+  screenTouchBridge.endX = touch.x;
+  screenTouchBridge.endY = touch.y;
+  if (touch.wasReleased()) {
+    finishScreenTouchBridge(touch.x, touch.y);
+  }
+  return true;
+}
+
+void handleHeadTouchBridge() {
+#if defined(ARDUINO_M5STACK_CORES3)
+  HeadTouchSensor::Gesture gesture = HeadTouchSensor::update();
+  switch (gesture) {
+    case HeadTouchSensor::Gesture::Press:
+      headTouchBridge.active = true;
+      headTouchBridge.swiped = false;
+      headTouchBridge.startedAt = millis();
+      headTouchBridge.direction = nullptr;
+      break;
+
+    case HeadTouchSensor::Gesture::SwipeForward:
+      if (!headTouchBridge.active) {
+        headTouchBridge.active = true;
+        headTouchBridge.startedAt = millis();
+      }
+      headTouchBridge.swiped = true;
+      headTouchBridge.direction = "forward";
+      break;
+
+    case HeadTouchSensor::Gesture::SwipeBackward:
+      if (!headTouchBridge.active) {
+        headTouchBridge.active = true;
+        headTouchBridge.startedAt = millis();
+      }
+      headTouchBridge.swiped = true;
+      headTouchBridge.direction = "backward";
+      break;
+
+    case HeadTouchSensor::Gesture::Release:
+      if (headTouchBridge.active) {
+        uint32_t durationMs = millis() - headTouchBridge.startedAt;
+        const char* touchGesture = headTouchBridge.swiped
+          ? "stroke"
+          : (durationMs >= STACKCHAN_TOUCH_PRESS_MS ? "press" : "tap");
+        queueTouchEvent(
+          "head_top",
+          touchGesture,
+          durationMs,
+          headTouchBridge.direction
+        );
+        headTouchBridge = HeadTouchBridgeState{};
+      }
+      break;
+
+    case HeadTouchSensor::Gesture::None:
+    default:
+      break;
+  }
+#endif
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -320,7 +594,11 @@ void mqttReconnect() {
     Serial.println("[MQTT] connected");
     mqttClient.subscribe(MQTT_TOPIC_FACE);
     mqttClient.subscribe(MQTT_TOPIC_CAPTURE);
-    Serial.printf("[MQTT] subscribed: %s , %s\n", MQTT_TOPIC_FACE, MQTT_TOPIC_CAPTURE);
+    Serial.printf(
+      "[MQTT] subscribed: %s , %s\n",
+      MQTT_TOPIC_FACE,
+      MQTT_TOPIC_CAPTURE
+    );
   } else {
     Serial.printf("[MQTT] connect failed, rc=%d (retry in 5s)\n", mqttClient.state());
   }
@@ -537,8 +815,10 @@ void setup()
     // Wifi設定読み込み
     wifi_s* wifi_info = system_config.getWiFiSetting();
     Serial.printf("\nSSID: %s\n",wifi_info->ssid.c_str());
-    Serial.printf("WiFi password loaded: %s
-", wifi_info->password.length() ? "yes" : "no");
+    Serial.printf(
+      "WiFi password loaded: %s\n",
+      wifi_info->password.length() ? "yes" : "no"
+    );
 
     // Wi-Fi接続：YAMLの設定だけを使用する。
     // スマホのテザリングは起動直後に見つかるまで時間がかかることがあるため、
@@ -612,6 +892,7 @@ void setup()
       //MQTT設定（表情リモート）
       mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
       mqttClient.setCallback(mqttCallback);
+      mqttClient.setBufferSize(1024);
       Serial.println("MQTT client configured");
     }else{
       M5.Lcd.print("Can't connect to WiFi. Start offline mode.\n");
@@ -649,6 +930,7 @@ void setup()
   avatar.addTask(servo, "servo", 2048);
   avatar.addTask(battery_check, "battery_check", 2048);
   avatar.setSpeechFont(&fonts::efontJA_16);
+  touchBootId = esp_random();
 
   Serial.printf("Speaker volume (yaml): %d\n", system_config.getExConfig().audio.speaker_volume);
   if(0 != system_config.getExConfig().audio.speaker_volume){
@@ -682,6 +964,7 @@ void loop()
 {
   //get_elapsed_time_micro("loop() start");
   M5.update();
+  handleHeadTouchBridge();
   //get_elapsed_time_micro("M5.update time");
   ModBase* mod = get_current_mod();
   mod->idle();
@@ -717,12 +1000,13 @@ void loop()
   if (count)
   {
     auto t = M5.Touch.getDetail();
-    if (t.wasPressed())
+    bool handledByTouchBridge = handleTouchBridge(t);
+    if (t.wasPressed() && !handledByTouchBridge)
     {
       mod->display_touched(t.x, t.y);
     }
 
-    if (t.wasFlicked())
+    if (t.wasFlicked() && !handledByTouchBridge)
     {
       int16_t dx = t.distanceX();
       int16_t dy = t.distanceY();
@@ -773,6 +1057,7 @@ void loop()
       }
     } else {
       mqttClient.loop();
+      flushTouchEventQueue();
     }
   }
 

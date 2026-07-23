@@ -7,6 +7,8 @@ firmware/RemoteConfig.h
 # Runtime data
 latest.jpg
 *.jpg.tmp
+touch-events.jsonl
+touch-events.jsonl.ack
 __pycache__/
 *.py[cod]
 .venv/

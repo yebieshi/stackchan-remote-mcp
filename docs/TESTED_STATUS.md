@@ -1,49 +1,38 @@
-# Tested status
+# 测试状态
 
-Tested on an M5Stack CoreS3 build environment with AI_StackChan_Ex.
+## 真机已验证
 
-Verified:
+- 连接 iPhone 兼容模式热点并稳定运行
+- 经 Nginx 初始化远程 MCP
+- 远程切换表情
+- 远程拍照并返回新图片
+- 热点中断后，恢复热点并重启 StackChan 可重新连接
+- CoreS3 release 固件完整编译、写入、哈希校验并自动重启
+- 固件占用约 21.1% RAM（68984 / 327680）和 38.7% Flash
+  （2537469 / 6553600）
+- 头顶轻点抵达 VPS 并保存为 `head_top / tap`
+- 头顶向后抚摸抵达 VPS 并保存为
+  `head_top / stroke / backward`
+- 正面屏幕抚摸抵达 VPS，并保留起止坐标
+- MCP 连接器刷新后可见未读读取与确认工具
+- Codex 在普通用户消息到来时自动读取触摸，并在纳入回应后确认归零
 
-- StackChan connects to an iPhone hotspot with compatibility mode enabled.
-- The hotspot connection remained stable for more than one hour.
-- Remote MCP initialization succeeds through Nginx.
-- `stackchan_face` changes expressions.
-- `stackchan_see` triggers a photo and returns the new image.
-- After hotspot interruption, turning the hotspot back on and rebooting StackChan restores the connection.
+## 触觉桥已完成
 
-Not implemented:
+- 正面屏幕 `tap`、`press`、`stroke` 识别代码
+- 头顶三段电容板按下、松开和双向抚摸接入代码
+- CoreS3 overlay 已在保留唤醒词模块的完整上游工程中编译成功
+- 8 条固件暂存队列
+- VPS 输入校验、设备事件去重、JSONL 持久化与确认游标
+- MCP 未读读取和确认工具
+- 未读分页按时间顺序返回，避免确认时跳过旧事件
 
-- Speech topic such as `stackchan/say`.
-- Automatic recovery without reboot after the hotspot disappears.
-- TLS for MQTT and the direct photo-upload path.
+服务端自动测试覆盖校验、方向字段、持久化、恢复、去重、确认、分页和保留上限。
 
-## Open-source package verification
+## 尚未单独校准
 
-The packaged v0.1 repository was tested in a separate Python virtual environment
-and on a separate MCP port, without replacing the already-running production copy.
+- 当前外壳已确认头顶向后抚摸方向；向前抚摸尚未单独做方向校准
+- `press` 分类、屏幕触摸范围和长按时长仍可按个人手势微调
+- 固件断开 MQTT 时的 8 条内存队列已有代码保护，尚未做满队列压力测试
 
-Verified:
-
-- Dependencies install successfully after installing `python3-venv`.
-- The environment-variable based configuration starts successfully.
-- FastMCP listens on the separate test port.
-- Nginx reverse proxy works when the upstream `Host` is set to the local MCP address.
-- Remote expression changes succeed.
-- Remote photo capture and image return succeed.
-
-## v0.1.1 repeated-capture fix
-
-A repeated-photo timeout was reproduced even though the device log showed both
-`frame acquired` and `uploaded ... -> relay OK`. The cause was stale/new-photo
-detection at the relay/MCP layer, not camera capture.
-
-The fix adds:
-
-- A monotonically increasing `X-Photo-Version` header for every upload.
-- Nanosecond file modification time as additional metadata.
-- Cache-busting requests and SHA-256 image-content comparison in the MCP server.
-- A 15-second polling window for the new photo.
-- Short camera frame-acquisition retries while keeping the preview subwindow enabled.
-
-After the fix, three consecutive remote photo captures returned three distinct
-images successfully.
+尚未实现 MQTT TLS、图片上传 HTTPS、热点消失后的自动恢复和语音主题。

@@ -12,6 +12,19 @@
 
 #define STACKCHAN_MQTT_TOPIC_FACE "stackchan/face"
 #define STACKCHAN_MQTT_TOPIC_CAPTURE "stackchan/capture"
+#define STACKCHAN_MQTT_TOPIC_TOUCH "stackchan/touch"
+
+// The default bridge zone covers the face while leaving the bottom control
+// strip available to the original firmware UI. Coordinates are for 320x240.
+#define STACKCHAN_TOUCH_ZONE_X_MIN 0
+#define STACKCHAN_TOUCH_ZONE_X_MAX 319
+#define STACKCHAN_TOUCH_ZONE_Y_MIN 0
+#define STACKCHAN_TOUCH_ZONE_Y_MAX 191
+
+// A movement of at least 24 pixels is a stroke. A mostly stationary touch held
+// for at least 800 ms is a press. Shorter stationary contact is a tap.
+#define STACKCHAN_TOUCH_STROKE_DISTANCE_PX 24
+#define STACKCHAN_TOUCH_PRESS_MS 800
 
 // Tested v0.1 setup uses a direct HTTP photo relay.
 // Replace the example IP and keep the token identical to the VPS environment file.
