@@ -9,7 +9,6 @@ latest.jpg
 *.jpg.tmp
 touch-events.jsonl
 touch-events.jsonl.ack
-touch-reply-history.json
 __pycache__/
 *.py[cod]
 .venv/

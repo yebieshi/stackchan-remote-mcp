@@ -1,74 +1,31 @@
 # Tested status
 
-Tested on an M5Stack CoreS3 build environment with AI_StackChan_Ex.
+## 真机已验证
 
-Verified:
+- 连接 iPhone 兼容模式热点并稳定运行
+- 经 Nginx 初始化远程 MCP
+- 远程切换表情
+- 远程拍照并返回新图片
+- 热点中断后，恢复热点并重启 StackChan 可重新连接
 
-- StackChan connects to an iPhone hotspot with compatibility mode enabled.
-- The hotspot connection remained stable for more than one hour.
-- Remote MCP initialization succeeds through Nginx.
-- `stackchan_face` changes expressions.
-- `stackchan_see` triggers a photo and returns the new image.
-- After hotspot interruption, turning the hotspot back on and rebooting StackChan restores the connection.
+## 触觉桥已完成
 
-Not implemented:
+- 正面屏幕 `tap`、`press`、`stroke` 识别代码
+- 头顶三段电容板按下、松开和双向抚摸接入代码
+- CoreS3 overlay 已在独立构建目录编译成功
+- 8 条固件暂存队列
+- VPS 输入校验、设备事件去重、JSONL 持久化与确认游标
+- MCP 未读读取和确认工具
+- 未读分页按时间顺序返回，避免确认时跳过旧事件
 
-- Speech topic such as `stackchan/say`.
-- Automatic recovery without reboot after the hotspot disappears.
-- TLS for MQTT and the direct photo-upload path.
+服务端自动测试覆盖校验、方向字段、持久化、恢复、去重、确认、分页和保留上限。
 
-## Touch bridge implementation status
+## 仍需真机验证
 
-Implemented:
+- 把已通过编译的最新 overlay 刷入目标 CoreS3
+- 分别摸正面屏幕和头顶，确认两种事件抵达 VPS
+- 校准屏幕范围、长按时长以及头顶前后方向是否符合外壳朝向
+- 刷新 MCP 连接后确认客户端能看到两个触摸工具
+- 验证个人指令会在新对话的每个用户回合先检查未读触摸
 
-- CoreS3 face-zone recognition for tap, press, and stroke.
-- Immediate local expression before network delivery.
-- Eight-event firmware queue for temporary MQTT disconnection.
-- Durable JSONL event store, device-event deduplication, and acknowledgement cursor.
-- MCP tools for reading and acknowledging touch events.
-- Low-latency OpenRouter / SiliconFlow Chat Completions and OpenAI Responses
-  worker with MQTT reply display.
-- Short local history for continuity across consecutive touch responses.
-
-Automated server tests cover validation, persistence, acknowledgement, pruning,
-deduplication, all supported provider paths, both model request formats, and
-output extraction.
-
-Still requires production verification:
-
-- Compile and flash against the exact AI_StackChan_Ex/CoreS3 environment.
-- Calibrate the physical touch zone and gesture thresholds.
-- Measure end-to-end model response latency over the phone hotspot.
-- Confirm Chinese text wrapping and the preferred reply display duration.
-- Verify systemd restart behavior and real API/MQTT failure recovery.
-
-## Open-source package verification
-
-The packaged v0.1 repository was tested in a separate Python virtual environment
-and on a separate MCP port, without replacing the already-running production copy.
-
-Verified:
-
-- Dependencies install successfully after installing `python3-venv`.
-- The environment-variable based configuration starts successfully.
-- FastMCP listens on the separate test port.
-- Nginx reverse proxy works when the upstream `Host` is set to the local MCP address.
-- Remote expression changes succeed.
-- Remote photo capture and image return succeed.
-
-## v0.1.1 repeated-capture fix
-
-A repeated-photo timeout was reproduced even though the device log showed both
-`frame acquired` and `uploaded ... -> relay OK`. The cause was stale/new-photo
-detection at the relay/MCP layer, not camera capture.
-
-The fix adds:
-
-- A monotonically increasing `X-Photo-Version` header for every upload.
-- Nanosecond file modification time as additional metadata.
-- Cache-busting requests and SHA-256 image-content comparison in the MCP server.
-- A 15-second polling window for the new photo.
-- Short camera frame-acquisition retries while keeping the preview subwindow enabled.
-
-After the fix, three consecutive remote photo captures returned three distinct
-images successfully.
+尚未实现 MQTT TLS、图片上传 HTTPS、热点消失后的自动恢复和语音主题。

@@ -17,6 +17,7 @@ class InvalidTouchEvent(ValueError):
 
 
 _ALLOWED_GESTURES = {"tap", "press", "stroke"}
+_ALLOWED_DIRECTIONS = {"forward", "backward"}
 _MAX_TEXT_LENGTH = 96
 
 
@@ -58,6 +59,17 @@ def normalize_touch_event(value: Any) -> dict[str, Any]:
         "gesture": gesture,
         "duration_ms": duration,
     }
+
+    direction = _bounded_text(value.get("direction"), "direction", required=False).lower()
+    if direction:
+        if gesture != "stroke":
+            raise InvalidTouchEvent("direction is only valid for stroke gestures")
+        if direction not in _ALLOWED_DIRECTIONS:
+            allowed = ", ".join(sorted(_ALLOWED_DIRECTIONS))
+            raise InvalidTouchEvent(
+                f"unsupported direction {direction!r}; allowed: {allowed}"
+            )
+        normalized["direction"] = direction
 
     for field in ("x_start", "y_start", "x_end", "y_end"):
         coordinate = value.get(field)
@@ -183,7 +195,12 @@ class TouchEventStore:
                 events = [
                     event for event in events if event["id"] > self._acknowledged_id
                 ]
-            return [dict(event) for event in events[-limit:]]
+                # Return the oldest unread items first. Acknowledging the final
+                # returned id must never skip older unread events.
+                events = events[:limit]
+            else:
+                events = events[-limit:]
+            return [dict(event) for event in events]
 
     def acknowledge(self, up_to_event_id: int) -> int:
         if isinstance(up_to_event_id, bool) or not isinstance(up_to_event_id, int):

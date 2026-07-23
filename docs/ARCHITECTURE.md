@@ -7,57 +7,46 @@ AI client / MCP host
         v
       Nginx
         |
-        | HTTP localhost:18003/mcp
+        | localhost:18003/mcp
         v
-FastMCP server
-   |          |
-   |          +---- reads/acks ---- touch event JSONL
-   |                                  ^
-   | MQTT publish                     | MQTT subscribe
-   v                                  |
-Mosquitto on VPS  <------------ StackChan on phone hotspot
-   |       ^                              |
-   |       |                              +-- local touch expression
-   |       +---- stackchan/reply ---------+
-   |                                      |
-   +-- stackchan/touch --> touch responder
-                              |
-                              | configured model API
-                              v
-                 OpenRouter / SiliconFlow / OpenAI
+FastMCP server -------- reads / acknowledges -------- touch event JSONL
+   |                                                   ^
+   | MQTT publish                                      | MQTT subscribe
+   v                                                   |
+Mosquitto on VPS <------------------------------- StackChan
 
 StackChan -- HTTP JPEG upload --> photo relay :18090
                                       |
-                                      | localhost GET latest.jpg
                                       v
                                 FastMCP returns image
 ```
 
 ## MQTT topics
 
-- `stackchan/face`: payload is one of `neutral`, `happy`, `sleepy`, `doubt`, `sad`, `angry`.
-- `stackchan/capture`: any payload triggers a photo capture.
-- `stackchan/touch`: device-to-VPS JSON event with `event`, `device`, `zone`,
-  `gesture`, `duration_ms`, optional coordinates/timestamp, and a deduplication ID.
-- `stackchan/reply`: VPS-to-device JSON containing model-generated `text`,
-  `expression`, and `display_ms`.
+- `stackchan/face`：远程表情名称。
+- `stackchan/capture`：任意消息触发拍照。
+- `stackchan/touch`：设备到 VPS 的触摸 JSON。
+
+触摸 JSON 的必需字段是 `event`、`device`、`zone`、`gesture` 和
+`duration_ms`。屏幕触摸可带坐标；头顶抚摸可带
+`direction=forward|backward`；`source_event_id` 用于去重。
 
 ## Touch lifecycle
 
-1. The CoreS3 firmware recognizes a touch in the configured face zone.
-2. StackChan changes expression immediately, before any network operation.
-3. On release, the firmware classifies the gesture and queues a JSON event.
-4. The MCP service persists the event. It remains unread until explicitly acknowledged.
-5. The responder batches a short burst of touches, calls the configured model API
-   (OpenRouter or SiliconFlow Chat Completions, or OpenAI Responses), and
-   publishes a concise reply.
-6. StackChan displays the reply and later restores the last remotely commanded face.
+1. 固件从正面屏幕或头顶三段电容板识别一次接触。
+2. 松开后，固件分类为 `tap`、`press` 或 `stroke` 并生成设备事件 ID。
+3. 若 MQTT 暂时断开，事件留在设备的 8 条内存队列中。
+4. MCP 服务订阅触摸主题、校验并保存 JSONL；重复发送不会产生重复记录。
+5. 下一次用户发消息时，AI 先读取最早的未读触摸。
+6. AI 把触摸自然融入回应后，确认这一批最后一个服务器事件 ID。
 
-The persistent MCP path and immediate response path are deliberately independent.
-If the model call fails, the touch is still recorded. If the MCP client is not
-open, the responder can still answer on the physical device.
+这是“至少处理一次”的设计：如果一次对话中断在确认之前，事件下次仍会返回；相比
+静默丢失，偶尔重复感知更容易发现和恢复。
 
-## Tested recovery behavior
+普通 Chat/Codex 对话不能由 MQTT 主动唤醒。因此自动取回由 MCP 工具说明与用户的
+持久个人指令共同触发，而不是 VPS 主动推送。
 
-If the phone hotspot is turned off and later turned back on, press StackChan's reboot button to reconnect.
-Automatic reconnect after hotspot loss is not implemented in v0.1.
+## Recovery
+
+如果手机热点关闭后再开启，当前已验证的恢复方式是按 StackChan 重启键。自动恢复
+热点连接尚未验证。

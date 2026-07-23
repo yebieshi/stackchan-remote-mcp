@@ -209,27 +209,24 @@ def stackchan_see() -> Image:
 def stackchan_recent_touches(
     limit: int = 10,
     unread_only: bool = True,
-    mark_read: bool = False,
 ) -> str:
-    """Read touch events sent by StackChan.
+    """Read the user's pending physical touches from StackChan.
 
-    Use this when you need to know whether the user recently touched the device.
-    By default it returns only unacknowledged events without changing their state.
-    Set mark_read only after the events have been incorporated into the response.
+    At the start of each conversational turn, use the default unread-only,
+    non-marking read before responding. Treat returned events as physical contact
+    from the user, incorporate them naturally, then acknowledge the last returned
+    id with stackchan_ack_touch. If no events are returned, continue silently.
     """
     events = touch_store.list_events(limit=limit, unread_only=unread_only)
     unread_before = touch_store.unread_count
     acknowledged_id = touch_store.acknowledged_id
-
-    if mark_read and events:
-        acknowledged_id = touch_store.acknowledge(events[-1]["id"])
 
     return json.dumps(
         {
             "events": events,
             "returned": len(events),
             "unread_before": unread_before,
-            "unread_after": touch_store.unread_count,
+            "unread_after": unread_before,
             "acknowledged_id": acknowledged_id,
         },
         ensure_ascii=False,
@@ -238,7 +235,7 @@ def stackchan_recent_touches(
 
 @mcp.tool()
 def stackchan_ack_touch(up_to_event_id: int) -> str:
-    """Acknowledge touch events through the given server-generated event id."""
+    """Mark touches through this event id read after incorporating them."""
     acknowledged_id = touch_store.acknowledge(up_to_event_id)
     return json.dumps(
         {

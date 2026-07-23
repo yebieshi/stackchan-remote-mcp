@@ -13,7 +13,6 @@
 #define STACKCHAN_MQTT_TOPIC_FACE "stackchan/face"
 #define STACKCHAN_MQTT_TOPIC_CAPTURE "stackchan/capture"
 #define STACKCHAN_MQTT_TOPIC_TOUCH "stackchan/touch"
-#define STACKCHAN_MQTT_TOPIC_REPLY "stackchan/reply"
 
 // The default bridge zone covers the face while leaving the bottom control
 // strip available to the original firmware UI. Coordinates are for 320x240.

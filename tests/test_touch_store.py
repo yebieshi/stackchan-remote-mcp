@@ -72,6 +72,43 @@ class TouchEventStoreTest(unittest.TestCase):
         with self.assertRaises(InvalidTouchEvent):
             store.add_payload(b"not-json")
 
+    def test_keeps_head_touch_swipe_direction(self) -> None:
+        store = TouchEventStore(self.path)
+        event = touch_event()
+        event["zone"] = "head_top"
+        event["direction"] = "forward"
+
+        stored = store.add_event(event)
+
+        self.assertEqual(stored["zone"], "head_top")
+        self.assertEqual(stored["direction"], "forward")
+
+    def test_rejects_direction_on_non_stroke(self) -> None:
+        store = TouchEventStore(self.path)
+        event = touch_event()
+        event["gesture"] = "tap"
+        event["direction"] = "forward"
+
+        with self.assertRaises(InvalidTouchEvent):
+            store.add_event(event)
+
+    def test_unread_pagination_never_skips_older_events(self) -> None:
+        store = TouchEventStore(self.path)
+        for source_id in ("one", "two", "three"):
+            store.add_event(touch_event(source_id))
+
+        first_page = store.list_events(limit=2)
+        self.assertEqual(
+            [event["source_event_id"] for event in first_page],
+            ["one", "two"],
+        )
+
+        store.acknowledge(first_page[-1]["id"])
+        self.assertEqual(
+            [event["source_event_id"] for event in store.list_events(limit=2)],
+            ["three"],
+        )
+
     def test_prunes_old_events(self) -> None:
         store = TouchEventStore(self.path, max_events=2)
         store.add_event(touch_event("one"))
