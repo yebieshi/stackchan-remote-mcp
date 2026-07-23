@@ -7,6 +7,8 @@
 - Added an optional immediate model worker using a private persona.
 - Added native OpenRouter Chat Completions support with GPT-4.1 nano as the
   low-latency example configuration.
+- Added a concise, understated touch-reply style guard and prevented prior
+  replies from becoming accidental style examples.
 - Added SiliconFlow Chat Completions support alongside OpenAI Responses support.
 - Added `stackchan/reply` display handling and non-blocking local touch feedback.
 - Added touch validation, deduplication, retention, and helper tests.

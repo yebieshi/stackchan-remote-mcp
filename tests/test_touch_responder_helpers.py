@@ -198,6 +198,10 @@ class TouchResponderHelpersTest(unittest.TestCase):
         self.assertEqual(
             headers["X-OpenRouter-Title"], "StackChan Tactile Bridge"
         )
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("不要表演深情", system_prompt)
+        self.assertIn("油腻套话", system_prompt)
+        self.assertIn("历史回复只用于保持连续", system_prompt)
 
 
 if __name__ == "__main__":
