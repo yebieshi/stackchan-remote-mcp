@@ -212,10 +212,12 @@ def stackchan_recent_touches(
 ) -> str:
     """Read the user's pending physical touches from StackChan.
 
-    At the start of each conversational turn, use the default unread-only,
-    non-marking read before responding. Treat returned events as physical contact
-    from the user, incorporate them naturally, then acknowledge the last returned
-    id with stackchan_ack_touch. If no events are returned, continue silently.
+    Call this tool only when the user says "摸摸" as an actual trigger. Do not
+    call it at the start of every conversational turn, or when the trigger word
+    is merely quoted or discussed. Use the default unread-only, non-marking read.
+    Treat returned events as physical contact from the user, incorporate them
+    naturally, then acknowledge the last returned id with stackchan_ack_touch.
+    If no events are returned, continue silently.
     """
     events = touch_store.list_events(limit=limit, unread_only=unread_only)
     unread_before = touch_store.unread_count
