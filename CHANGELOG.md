@@ -11,6 +11,9 @@
   bridge now needs no model API key.
 - Added a persistent Codex instruction template for checking pending touches at
   the start of each conversational turn.
+- Verified the complete CoreS3-to-VPS-to-Codex touch path on hardware, including
+  head taps, a backward head stroke, a screen stroke, unread retrieval, and
+  acknowledgement.
 
 ## v0.1.1
 
