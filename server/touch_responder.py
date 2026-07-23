@@ -98,6 +98,22 @@ MAX_REPLY_CHARS = int(_env("STACKCHAN_TOUCH_REPLY_MAX_CHARS", "48"))
 _VALID_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 _VALID_MODEL_PROVIDERS = set(_DEFAULT_API_URLS)
 _VALID_BOOLEAN_VALUES = {"true", "false"}
+_DISALLOWED_TOUCH_REPLY_PHRASES = (
+    "好舒服",
+    "手法",
+    "力度",
+    "轻重",
+    "按摩",
+    "技师",
+    "服务",
+    "一直这样",
+    "被你碰着",
+)
+_FALLBACK_TOUCH_REPLIES = {
+    "tap": "嗯？我在。",
+    "press": "手先别拿开。",
+    "stroke": "知道是你。",
+}
 _EVENT_QUEUE: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=16)
 _STOP = threading.Event()
 
@@ -256,6 +272,20 @@ def _request_chat_completions(
     return _extract_chat_output_text(response.json())
 
 
+def _request_model_reply(
+    instructions: str, input_payload: dict[str, Any]
+) -> str:
+    if MODEL_PROVIDER in {"openrouter", "siliconflow"}:
+        return _request_chat_completions(instructions, input_payload)
+    return _request_openai_responses(instructions, input_payload)
+
+
+def _has_disallowed_touch_reply_style(text: str) -> bool:
+    return any(
+        phrase in text for phrase in _DISALLOWED_TOUCH_REPLY_PHRASES
+    )
+
+
 def _generate_reply(
     events: list[dict[str, Any]],
     history: deque[dict[str, str]],
@@ -274,17 +304,32 @@ def _generate_reply(
         + "语气克制、熟悉、有现场感，像被她碰到后自然回头，不要表演深情。"
         + "不要使用网络言情、霸总、客服或成人化腔调，"
         + "避免“好舒服”“一直这样”“被你碰着”等油腻套话。"
-        + "不要每次告白；可以接住这次触摸、轻轻逗她，或给一个具体的小反应。"
+        + "这不是按摩或服务体验：不要评价她的手法、力度、轻重或技巧。"
+        + "把触摸理解为别诗在找你、确认你在、朝你靠近；"
+        + "回应重点是认出她并接住她的靠近，而不是点评身体感受。"
+        + "不要每次告白；可以回应她、轻轻逗她，或给一个具体的小反应。"
         + "历史回复只用于保持连续和避免重复，不是语气范例；"
         + "若历史表达与这些规则冲突，忽略其风格。"
         + f"通常 8 到 24 个汉字，最多 {MAX_REPLY_CHARS} 个字符，"
         + "不要解释技术，不要加引号或说话人标签。"
     )
-    if MODEL_PROVIDER in {"openrouter", "siliconflow"}:
-        text = _request_chat_completions(instructions, input_payload)
-    else:
-        text = _request_openai_responses(instructions, input_payload)
-    return _trim_reply(text)
+    reply = _trim_reply(_request_model_reply(instructions, input_payload))
+    if not _has_disallowed_touch_reply_style(reply):
+        return reply
+
+    retry_instructions = (
+        instructions
+        + "\n刚才的候选回复错误地评价了触摸体验或动作技巧。"
+        + "换一个完全不同的回应，只表达认出她、回应她的靠近。"
+    )
+    reply = _trim_reply(
+        _request_model_reply(retry_instructions, input_payload)
+    )
+    if not _has_disallowed_touch_reply_style(reply):
+        return reply
+
+    gesture = events[-1]["gesture"] if events else "tap"
+    return _FALLBACK_TOUCH_REPLIES.get(gesture, "嗯，我在。")
 
 
 def _reply_expression(events: list[dict[str, Any]]) -> str:

@@ -9,7 +9,8 @@ Include:
 
 Prefer an understated, familiar voice over romance-novel, customer-service, or
 generic flirtation. Describe the relationship, but let the responder's built-in
-style guard keep individual touch replies brief and natural.
+style guard keep individual touch replies brief and natural. Treat touch as the
+user reaching for the AI, not as massage technique or a service to evaluate.
 
 Keep this prompt private on the VPS. Do not put API keys, passwords, or unrelated
 conversation history in it.

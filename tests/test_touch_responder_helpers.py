@@ -201,7 +201,70 @@ class TouchResponderHelpersTest(unittest.TestCase):
         system_prompt = request["messages"][0]["content"]
         self.assertIn("不要表演深情", system_prompt)
         self.assertIn("油腻套话", system_prompt)
+        self.assertIn("这不是按摩或服务体验", system_prompt)
+        self.assertIn("认出她并接住她的靠近", system_prompt)
         self.assertIn("历史回复只用于保持连续", system_prompt)
+
+    def test_retries_a_touch_reply_that_rates_the_users_technique(
+        self,
+    ) -> None:
+        first_response = Mock()
+        first_response.raise_for_status.return_value = None
+        first_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "你这手法轻得刚刚好。",
+                    }
+                }
+            ]
+        }
+        second_response = Mock()
+        second_response.raise_for_status.return_value = None
+        second_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "知道是你，我回头啦。",
+                    }
+                }
+            ]
+        }
+        event = {
+            "event": "touch",
+            "device": "stackchan-01",
+            "zone": "head_front",
+            "gesture": "stroke",
+            "duration_ms": 1200,
+        }
+
+        with (
+            patch.multiple(
+                touch_responder,
+                MODEL_PROVIDER="openrouter",
+                MODEL_API_URL=(
+                    "https://openrouter.ai/api/v1/chat/completions"
+                ),
+                MODEL_NAME="openai/gpt-4.1-nano",
+            ),
+            patch.object(
+                touch_responder.requests,
+                "post",
+                side_effect=[first_response, second_response],
+            ) as post,
+        ):
+            reply = touch_responder._generate_reply(
+                [event],
+                touch_responder.deque(maxlen=6),
+                "你是阿叙。",
+            )
+
+        self.assertEqual(reply, "知道是你，我回头啦。")
+        self.assertEqual(post.call_count, 2)
+        retry_prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
+        self.assertIn("候选回复错误地评价了触摸体验", retry_prompt)
 
 
 if __name__ == "__main__":
