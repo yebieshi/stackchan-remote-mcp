@@ -15,9 +15,9 @@
 触觉桥本身不调用任何模型服务，因此不需要 OpenAI、OpenRouter 或硅基流动的 API
 Key，也不会产生模型费用。头部两侧灯带仍由上游固件管理，本版本不改变灯光行为。
 
-> 状态：表情与拍照链路已在真机验证。触觉桥服务端测试已通过；新加入的头顶触摸
-> 仍需在目标 CoreS3 上完成编译、刷写和端到端验证。公开部署前请阅读
-> `docs/SECURITY.md`。
+> 状态：表情、拍照和触觉桥均已在 CoreS3 真机完成端到端验证。正面屏幕与头顶
+> 触摸可经 MQTT 抵达 VPS，保留为未读事件，并在下一次 Codex 对话中自动取回和
+> 确认。公开部署前请阅读 `docs/SECURITY.md`。
 
 ## 工作方式
 
@@ -76,6 +76,10 @@ docs/
 
 `RemoteConfig.h` 含密钥，禁止提交到 Git。此 overlay 依赖当前上游已有的
 `driver/HeadTouchSensor.h`。
+
+已验证的 CoreS3 release 构建占用约 21.1% RAM 和 38.7% Flash。若上游
+`SimpleVox` 的 Git 依赖临时下载失败，可在网络恢复后重试，或按上游指定提交把
+该依赖放入本地 `firmware/lib/SimpleVox`；这不影响触觉桥本身的代码。
 
 ## 2. 部署 VPS
 
@@ -149,6 +153,10 @@ systemctl status stackchan-relay stackchan-mcp mosquitto
 3. 触摸 StackChan 的正面屏幕或头顶触摸板
 4. `stackchan_recent_touches(unread_only=true)`
 5. 对返回的最后一个 `id` 调用 `stackchan_ack_touch(id)`
+
+真机端到端验证已覆盖头顶轻点、头顶向后抚摸、正面屏幕抚摸、VPS 持久保存、
+Codex 自动取回和确认归零。不同外壳的前后方向、长按阈值和触摸范围可能需要按实际
+安装方向微调。
 
 不刷固件也可以先在 VPS 模拟：
 
