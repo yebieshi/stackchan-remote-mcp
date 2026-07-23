@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Added the tactile bridge from CoreS3 touch input to a durable VPS event queue.
+- Added MCP tools to read and acknowledge touch events.
+- Added an optional immediate model worker using a private persona.
+- Added SiliconFlow Chat Completions support alongside OpenAI Responses support.
+- Added `stackchan/reply` display handling and non-blocking local touch feedback.
+- Added touch validation, deduplication, retention, and helper tests.
+
 ## v0.1.1
 
 - Fixed repeated remote photo captures timing out after the JPEG had already

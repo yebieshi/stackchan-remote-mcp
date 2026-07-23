@@ -21,3 +21,14 @@ This directory contains the modified `main.cpp` used for the tested remote-contr
 - Receives expression commands from `stackchan/face`.
 - Receives capture commands from `stackchan/capture`.
 - Uploads the captured JPEG to the VPS photo relay.
+- Treats the configurable upper screen region as the tactile face surface.
+- Responds locally on contact, then classifies tap, press, or stroke on release.
+- Queues touch JSON to `stackchan/touch` and retries after MQTT reconnection.
+- Receives model replies on `stackchan/reply` and displays them as speech text.
+
+## Touch calibration
+
+Copy all `STACKCHAN_TOUCH_*` values from `RemoteConfig.example.h` into the private
+`RemoteConfig.h`. The default face zone leaves the bottom 48 pixels to the original
+UI. Adjust the zone first, then tune stroke distance and press duration after
+testing on the actual enclosure.

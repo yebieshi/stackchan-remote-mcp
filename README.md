@@ -7,12 +7,16 @@
 - 远程切换 StackChan 表情
 - 远程触发摄像头拍照
 - 将最新照片作为 MCP 图片结果返回
+- 在 CoreS3 正面触摸屏识别轻点、长按和抚摸
+- 触摸时先在本地立即闭眼回应，不等待网络
+- 将触摸事件持久记录在 VPS，并通过 MCP 读取和确认
+- 触摸直接触发一次低延迟模型请求，把即时短回应显示回 StackChan
 - 手机热点模式
 - VPS 上的 MCP 与照片中转服务常驻运行
 
-这个项目来自人机亲密关系的实际使用场景：希望 AI 不只停留在聊天窗口，也能通过一个小小的机器人接口进入日常生活。它不讨论 AI“究竟是什么”，只提供一条已经实际跑通的技术路径。
+这个项目来自人机亲密关系的实际使用场景：希望 AI 不只停留在聊天窗口，也能通过一个小小的机器人接口进入日常生活。它不讨论 AI“究竟是什么”，只提供一条可以实际部署的技术路径。
 
-> 状态：v0.1.1 已验证。表情控制、远程拍照、连续拍照与图片返回均已跑通；网络传输尚未安全加固。公开部署前请先阅读 `docs/SECURITY.md`。
+> 状态：v0.1.1 的表情与拍照链路已在真机验证。触觉桥接已完成服务端自动测试，但仍需在 CoreS3 与生产 VPS 上完成刷写和端到端验证。网络传输尚未安全加固。公开部署前请先阅读 `docs/SECURITY.md`。
 
 ## 为什么做这个项目
 
@@ -32,6 +36,8 @@
 - 一张用于存放 StackChan 配置文件的 Micro SD Card
 - 一部可提供 2.4 GHz 兼容热点的手机
 - 一个支持远程 Streamable HTTP MCP 的 AI 客户端或宿主
+- 一个受支持的模型 API key（硅基流动或 OpenAI；仅即时模型回应需要，
+  持久触摸记录不需要）
 
 ## 架构
 
@@ -39,16 +45,20 @@
 AI / MCP 客户端
       ↓ HTTPS
 Nginx → FastMCP（VPS）
-             ↓ MQTT
-       Mosquitto broker
-             ↓
-       StackChan（手机热点）
-          ↙          ↘
-       表情        拍照上传
-                       ↓
-              Photo Relay（VPS）
-                       ↓
-                 MCP 返回图片
+       ↙             ↘
+  读取触摸记录       MQTT 控制
+       ↑               ↓
+  持久触摸队列    Mosquitto broker
+       ↑               ↕
+       └──── MQTT ─ StackChan（手机热点）
+                         ↙       ↘
+                    本地触摸反应  拍照上传
+                         ↓
+                  即时触摸回应服务
+                         ↓ 模型 API
+                 硅基流动 / OpenAI 模型
+                         ↓ MQTT reply
+                    StackChan 显示短句
 ```
 
 详细说明见 `docs/ARCHITECTURE.md`。
@@ -62,6 +72,8 @@ firmware/
 server/
   stackchan_remote_mcp.py
   photo_relay.py
+  touch_store.py
+  touch_responder.py
 deploy/
   nginx-stackchan.conf.example
   mosquitto-stackchan.conf.example
@@ -106,7 +118,29 @@ sudo -u stackchan /opt/stackchan-remote-mcp/.venv/bin/pip install -r /opt/stackc
 sudo cp config/stackchan.env.example /etc/stackchan-remote-mcp.env
 sudo chmod 600 /etc/stackchan-remote-mcp.env
 sudo editor /etc/stackchan-remote-mcp.env
+
+sudo cp config/touch-persona.example.txt /etc/stackchan-touch-persona.txt
+sudo chown root:stackchan /etc/stackchan-touch-persona.txt
+sudo chmod 640 /etc/stackchan-touch-persona.txt
+sudo editor /etc/stackchan-touch-persona.txt
 ```
+
+把身份、称呼、关系语气和边界写进私有的 persona 文件。不要把真实 API key
+或私密 persona 提交到仓库。
+
+示例环境文件默认使用硅基流动：
+
+```text
+STACKCHAN_MODEL_PROVIDER=siliconflow
+STACKCHAN_MODEL_API_KEY=你的硅基流动密钥
+STACKCHAN_MODEL_API_URL=https://api.siliconflow.cn/v1/chat/completions
+STACKCHAN_MODEL_NAME=Qwen/Qwen3-8B
+STACKCHAN_MODEL_ENABLE_THINKING=false
+```
+
+`STACKCHAN_MODEL_ENABLE_THINKING=false` 用于缩短触摸后的等待时间。模型名称需以
+硅基流动控制台当前可用的模型为准。若改用 OpenAI，把 provider、URL 和模型名
+改为对应值即可；旧版 `STACKCHAN_OPENAI_*` 环境变量仍可兼容读取。
 
 生成 Mosquitto 密码：
 
@@ -121,7 +155,7 @@ sudo systemctl restart mosquitto
 ```bash
 sudo cp deploy/systemd/*.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now stackchan-relay stackchan-mcp
+sudo systemctl enable --now stackchan-relay stackchan-mcp stackchan-touch-responder
 ```
 
 查看日志：
@@ -129,6 +163,7 @@ sudo systemctl enable --now stackchan-relay stackchan-mcp
 ```bash
 sudo journalctl -u stackchan-relay -f
 sudo journalctl -u stackchan-mcp -f
+sudo journalctl -u stackchan-touch-responder -f
 ```
 
 ## 3. 配置 Nginx
@@ -174,6 +209,34 @@ https://YOUR_DOMAIN/stackchan/mcp
 
 1. `stackchan_face("happy")`
 2. `stackchan_see()`
+3. 触摸 StackChan 正面上方区域，确认先本地闭眼，再出现模型短回应
+4. `stackchan_recent_touches(unread_only=true)`，确认同一触摸已抵达持久队列
+5. 用 `stackchan_ack_touch(event_id)` 确认已处理的触摸
+
+不刷固件也可以先在 VPS 模拟一条触摸：
+
+```bash
+mosquitto_pub -h 127.0.0.1 -u stackchan -P 'YOUR_PASSWORD' \
+  -t stackchan/touch \
+  -m '{"event":"touch","device":"stackchan-test","zone":"head_front","gesture":"stroke","duration_ms":1200,"source_event_id":"manual-1"}'
+```
+
+另开一个终端订阅 `stackchan/reply`，可直接观察即时模型回应：
+
+```bash
+mosquitto_sub -h 127.0.0.1 -u stackchan -P 'YOUR_PASSWORD' \
+  -t stackchan/reply -v
+```
+
+## 触觉桥接
+
+- `tap`：短而基本静止的触摸
+- `press`：基本静止且达到配置时长的长按
+- `stroke`：移动距离达到配置阈值的抚摸
+- 默认触摸区是 320×240 屏幕的上方 192 像素，底部留给原固件 UI
+- 固件离线时最多缓存 8 条触摸，MQTT 恢复后继续发送
+- VPS 对设备事件 ID 去重，并用 JSONL 和确认游标持久化
+- 连续触摸会在一个很短的窗口中合并成一次模型回应，避免抚摸时刷屏
 
 ## v0.1.1 修复
 
@@ -188,7 +251,7 @@ https://YOUR_DOMAIN/stackchan/mcp
 
 ## 安全提醒
 
-当前已验证版本使用明文 MQTT 与直接 HTTP 图片上传。它能运行，但还不是安全加固方案。请务必阅读 `docs/SECURITY.md`，不要照搬真实密钥，也不要把摄像头访问权暴露给不可信客户端。
+当前方案使用明文 MQTT 与直接 HTTP 图片上传。它能运行，但还不是安全加固方案。即时回应还会把经过最小化的触摸描述发送给所配置的模型服务。请务必阅读 `docs/SECURITY.md`，不要照搬真实密钥，也不要把摄像头、触摸记录或 persona 暴露给不可信客户端。
 
 ## 上游与许可证
 

@@ -5,12 +5,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 
+import paho.mqtt.client as mqtt
 import paho.mqtt.publish as publish
 import requests
 from mcp.server.fastmcp import FastMCP, Image
+
+from touch_store import InvalidTouchEvent, TouchEventStore
 
 
 def _env(name: str, default: str | None = None, *, required: bool = False) -> str:
@@ -26,6 +30,10 @@ MQTT_USER = _env("STACKCHAN_MQTT_USER", required=True)
 MQTT_PASS = _env("STACKCHAN_MQTT_PASS", required=True)
 MQTT_TOPIC_FACE = _env("STACKCHAN_MQTT_TOPIC_FACE", "stackchan/face")
 MQTT_TOPIC_CAPTURE = _env("STACKCHAN_MQTT_TOPIC_CAPTURE", "stackchan/capture")
+MQTT_TOPIC_TOUCH = _env("STACKCHAN_MQTT_TOPIC_TOUCH", "stackchan/touch")
+MQTT_TOUCH_CLIENT_ID = _env(
+    "STACKCHAN_MQTT_TOUCH_CLIENT_ID", "stackchan-mcp-touch-listener"
+)
 
 RELAY_URL = _env("STACKCHAN_RELAY_URL", "http://127.0.0.1:18090").rstrip("/")
 RELAY_TOKEN = _env("STACKCHAN_RELAY_TOKEN", required=True)
@@ -33,9 +41,18 @@ RELAY_TOKEN = _env("STACKCHAN_RELAY_TOKEN", required=True)
 MCP_HOST = _env("STACKCHAN_MCP_HOST", "0.0.0.0")
 MCP_PORT = int(_env("STACKCHAN_MCP_PORT", "18003"))
 
+TOUCH_EVENT_PATH = _env(
+    "STACKCHAN_TOUCH_EVENT_PATH",
+    "/var/lib/stackchan-remote-mcp/touch-events.jsonl",
+)
+TOUCH_MAX_EVENTS = int(_env("STACKCHAN_TOUCH_MAX_EVENTS", "1000"))
+
 mcp = FastMCP("stackchan", host=MCP_HOST, port=MCP_PORT)
+touch_store = TouchEventStore(TOUCH_EVENT_PATH, max_events=TOUCH_MAX_EVENTS)
 
 _ALLOWED_EXPRESSIONS = {"neutral", "happy", "sleepy", "doubt", "sad", "angry"}
+_touch_listener: mqtt.Client | None = None
+_touch_listener_connected = False
 
 
 def _mqtt_pub(topic: str, payload: str) -> None:
@@ -58,6 +75,74 @@ def _get_latest_photo() -> requests.Response:
         params={"_": time.time_ns()},
         timeout=5,
     )
+
+
+def _on_touch_connect(
+    client: mqtt.Client,
+    userdata: object,
+    flags: mqtt.ConnectFlags,
+    reason_code: mqtt.ReasonCode,
+    properties: mqtt.Properties | None,
+) -> None:
+    del userdata, flags, properties
+    global _touch_listener_connected
+    if reason_code == 0:
+        client.subscribe(MQTT_TOPIC_TOUCH, qos=0)
+        _touch_listener_connected = True
+        print(f"[TOUCH] subscribed to {MQTT_TOPIC_TOUCH}")
+    else:
+        _touch_listener_connected = False
+        print(f"[TOUCH] MQTT connection failed: {reason_code}")
+
+
+def _on_touch_disconnect(
+    client: mqtt.Client,
+    userdata: object,
+    disconnect_flags: mqtt.DisconnectFlags,
+    reason_code: mqtt.ReasonCode,
+    properties: mqtt.Properties | None,
+) -> None:
+    del client, userdata, disconnect_flags, properties
+    global _touch_listener_connected
+    _touch_listener_connected = False
+    print(f"[TOUCH] MQTT disconnected: {reason_code}")
+
+
+def _on_touch_message(
+    client: mqtt.Client, userdata: object, message: mqtt.MQTTMessage
+) -> None:
+    del client, userdata
+    try:
+        event = touch_store.add_payload(message.payload)
+    except InvalidTouchEvent as exc:
+        print(f"[TOUCH] rejected malformed event: {exc}")
+        return
+    except OSError as exc:
+        print(f"[TOUCH] could not persist event: {exc}")
+        return
+
+    print(
+        f"[TOUCH] stored id={event['id']} device={event['device']} "
+        f"zone={event['zone']} gesture={event['gesture']}"
+    )
+
+
+def _start_touch_listener() -> mqtt.Client:
+    global _touch_listener
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=MQTT_TOUCH_CLIENT_ID,
+        protocol=mqtt.MQTTv311,
+    )
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
+    client.on_connect = _on_touch_connect
+    client.on_disconnect = _on_touch_disconnect
+    client.on_message = _on_touch_message
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
+    client.connect_async(MQTT_BROKER, MQTT_PORT, keepalive=60)
+    client.loop_start()
+    _touch_listener = client
+    return client
 
 
 @mcp.tool()
@@ -121,17 +206,65 @@ def stackchan_see() -> Image:
 
 
 @mcp.tool()
+def stackchan_recent_touches(
+    limit: int = 10,
+    unread_only: bool = True,
+    mark_read: bool = False,
+) -> str:
+    """Read touch events sent by StackChan.
+
+    Use this when you need to know whether the user recently touched the device.
+    By default it returns only unacknowledged events without changing their state.
+    Set mark_read only after the events have been incorporated into the response.
+    """
+    events = touch_store.list_events(limit=limit, unread_only=unread_only)
+    unread_before = touch_store.unread_count
+    acknowledged_id = touch_store.acknowledged_id
+
+    if mark_read and events:
+        acknowledged_id = touch_store.acknowledge(events[-1]["id"])
+
+    return json.dumps(
+        {
+            "events": events,
+            "returned": len(events),
+            "unread_before": unread_before,
+            "unread_after": touch_store.unread_count,
+            "acknowledged_id": acknowledged_id,
+        },
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
+def stackchan_ack_touch(up_to_event_id: int) -> str:
+    """Acknowledge touch events through the given server-generated event id."""
+    acknowledged_id = touch_store.acknowledge(up_to_event_id)
+    return json.dumps(
+        {
+            "acknowledged_id": acknowledged_id,
+            "unread": touch_store.unread_count,
+        }
+    )
+
+
+@mcp.tool()
 def stackchan_status() -> str:
-    """Check the VPS photo relay. This does not prove that StackChan itself is online."""
+    """Check the photo relay and the touch bridge listener on the VPS."""
     try:
         response = requests.get(f"{RELAY_URL}/health", timeout=5)
     except requests.RequestException as exc:
         return f"relay unreachable: {exc}"
 
     if response.status_code == 200:
-        return "relay alive"
+        listener = "connected" if _touch_listener_connected else "connecting"
+        return (
+            f"relay alive; touch listener {listener}; "
+            f"unread touches={touch_store.unread_count}"
+        )
     return f"relay status {response.status_code}"
 
 
 if __name__ == "__main__":
+    _start_touch_listener()
     mcp.run(transport="streamable-http")

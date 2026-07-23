@@ -1,0 +1,11 @@
+Describe the AI identity and relationship voice that should answer through StackChan.
+
+Include:
+- the AI's chosen name and first-person voice;
+- what the user prefers to be called;
+- the established tone and relationship boundaries;
+- how a tap, press, or stroke should feel different;
+- any phrases or generic assistant mannerisms to avoid.
+
+Keep this prompt private on the VPS. Do not put API keys, passwords, or unrelated
+conversation history in it.

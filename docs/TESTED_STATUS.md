@@ -17,6 +17,30 @@ Not implemented:
 - Automatic recovery without reboot after the hotspot disappears.
 - TLS for MQTT and the direct photo-upload path.
 
+## Touch bridge implementation status
+
+Implemented:
+
+- CoreS3 face-zone recognition for tap, press, and stroke.
+- Immediate local expression before network delivery.
+- Eight-event firmware queue for temporary MQTT disconnection.
+- Durable JSONL event store, device-event deduplication, and acknowledgement cursor.
+- MCP tools for reading and acknowledging touch events.
+- Low-latency SiliconFlow Chat Completions / OpenAI Responses worker and MQTT
+  reply display.
+- Short local history for continuity across consecutive touch responses.
+
+Automated server tests cover validation, persistence, acknowledgement, pruning,
+deduplication, both supported model request formats, and output extraction.
+
+Still requires production verification:
+
+- Compile and flash against the exact AI_StackChan_Ex/CoreS3 environment.
+- Calibrate the physical touch zone and gesture thresholds.
+- Measure end-to-end model response latency over the phone hotspot.
+- Confirm Chinese text wrapping and the preferred reply display duration.
+- Verify systemd restart behavior and real API/MQTT failure recovery.
+
 ## Open-source package verification
 
 The packaged v0.1 repository was tested in a separate Python virtual environment
