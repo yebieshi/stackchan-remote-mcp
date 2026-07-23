@@ -26,12 +26,13 @@ Implemented:
 - Eight-event firmware queue for temporary MQTT disconnection.
 - Durable JSONL event store, device-event deduplication, and acknowledgement cursor.
 - MCP tools for reading and acknowledging touch events.
-- Low-latency SiliconFlow Chat Completions / OpenAI Responses worker and MQTT
-  reply display.
+- Low-latency OpenRouter / SiliconFlow Chat Completions and OpenAI Responses
+  worker with MQTT reply display.
 - Short local history for continuity across consecutive touch responses.
 
 Automated server tests cover validation, persistence, acknowledgement, pruning,
-deduplication, both supported model request formats, and output extraction.
+deduplication, all supported provider paths, both model request formats, and
+output extraction.
 
 Still requires production verification:
 

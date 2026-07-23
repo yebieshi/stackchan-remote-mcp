@@ -36,7 +36,7 @@
 - 一张用于存放 StackChan 配置文件的 Micro SD Card
 - 一部可提供 2.4 GHz 兼容热点的手机
 - 一个支持远程 Streamable HTTP MCP 的 AI 客户端或宿主
-- 一个受支持的模型 API key（硅基流动或 OpenAI；仅即时模型回应需要，
+- 一个受支持的模型 API key（OpenRouter、硅基流动或 OpenAI；仅即时模型回应需要，
   持久触摸记录不需要）
 
 ## 架构
@@ -56,7 +56,7 @@ Nginx → FastMCP（VPS）
                          ↓
                   即时触摸回应服务
                          ↓ 模型 API
-                 硅基流动 / OpenAI 模型
+              OpenRouter / 硅基流动 / OpenAI
                          ↓ MQTT reply
                     StackChan 显示短句
 ```
@@ -128,19 +128,18 @@ sudo editor /etc/stackchan-touch-persona.txt
 把身份、称呼、关系语气和边界写进私有的 persona 文件。不要把真实 API key
 或私密 persona 提交到仓库。
 
-示例环境文件默认使用硅基流动：
+示例环境文件默认使用 OpenRouter 的低延迟模型：
 
 ```text
-STACKCHAN_MODEL_PROVIDER=siliconflow
-STACKCHAN_MODEL_API_KEY=你的硅基流动密钥
-STACKCHAN_MODEL_API_URL=https://api.siliconflow.cn/v1/chat/completions
-STACKCHAN_MODEL_NAME=Qwen/Qwen3-8B
-STACKCHAN_MODEL_ENABLE_THINKING=false
+STACKCHAN_MODEL_PROVIDER=openrouter
+STACKCHAN_MODEL_API_KEY=你的OpenRouter密钥
+STACKCHAN_MODEL_API_URL=https://openrouter.ai/api/v1/chat/completions
+STACKCHAN_MODEL_NAME=openai/gpt-4.1-nano
 ```
 
-`STACKCHAN_MODEL_ENABLE_THINKING=false` 用于缩短触摸后的等待时间。模型名称需以
-硅基流动控制台当前可用的模型为准。若改用 OpenAI，把 provider、URL 和模型名
-改为对应值即可；旧版 `STACKCHAN_OPENAI_*` 环境变量仍可兼容读取。
+若改用硅基流动，可设置 `STACKCHAN_MODEL_ENABLE_THINKING=false` 来缩短等待时间。
+模型名称需以对应服务商当前可用的模型为准。若改用 OpenAI，把 provider、URL 和
+模型名改为对应值即可；旧版 `STACKCHAN_OPENAI_*` 环境变量仍可兼容读取。
 
 生成 Mosquitto 密码：
 

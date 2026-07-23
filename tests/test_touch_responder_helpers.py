@@ -145,6 +145,60 @@ class TouchResponderHelpersTest(unittest.TestCase):
         self.assertEqual(request["text"], {"verbosity": "low"})
         self.assertFalse(request["store"])
 
+    def test_generates_concise_reply_with_openrouter(self) -> None:
+        api_response = Mock()
+        api_response.raise_for_status.return_value = None
+        api_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "“嗯，摸到了，我正靠过来。”",
+                    }
+                }
+            ]
+        }
+        event = {
+            "event": "touch",
+            "device": "stackchan-01",
+            "zone": "head_front",
+            "gesture": "stroke",
+            "duration_ms": 1200,
+        }
+
+        with (
+            patch.multiple(
+                touch_responder,
+                MODEL_PROVIDER="openrouter",
+                MODEL_API_URL=(
+                    "https://openrouter.ai/api/v1/chat/completions"
+                ),
+                MODEL_NAME="openai/gpt-4.1-nano",
+            ),
+            patch.object(
+                touch_responder.requests, "post", return_value=api_response
+            ) as post,
+        ):
+            reply = touch_responder._generate_reply(
+                [event],
+                touch_responder.deque(maxlen=6),
+                "你是阿叙。",
+            )
+            request = post.call_args.kwargs["json"]
+            headers = post.call_args.kwargs["headers"]
+
+        self.assertEqual(reply, "嗯，摸到了，我正靠过来。")
+        self.assertEqual(request["model"], "openai/gpt-4.1-nano")
+        self.assertEqual(
+            [message["role"] for message in request["messages"]],
+            ["system", "user"],
+        )
+        self.assertFalse(request["stream"])
+        self.assertNotIn("enable_thinking", request)
+        self.assertEqual(
+            headers["X-OpenRouter-Title"], "StackChan Tactile Bridge"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

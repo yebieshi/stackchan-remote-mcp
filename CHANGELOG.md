@@ -5,6 +5,8 @@
 - Added the tactile bridge from CoreS3 touch input to a durable VPS event queue.
 - Added MCP tools to read and acknowledge touch events.
 - Added an optional immediate model worker using a private persona.
+- Added native OpenRouter Chat Completions support with GPT-4.1 nano as the
+  low-latency example configuration.
 - Added SiliconFlow Chat Completions support alongside OpenAI Responses support.
 - Added `stackchan/reply` display handling and non-blocking local touch feedback.
 - Added touch validation, deduplication, retention, and helper tests.

@@ -47,10 +47,12 @@ if not MODEL_API_KEY:
 
 _DEFAULT_API_URLS = {
     "openai": "https://api.openai.com/v1/responses",
+    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     "siliconflow": "https://api.siliconflow.cn/v1/chat/completions",
 }
 _DEFAULT_MODELS = {
     "openai": "gpt-5.6-luna",
+    "openrouter": "openai/gpt-4.1-nano",
     "siliconflow": "Qwen/Qwen3-8B",
 }
 MODEL_API_URL = (
@@ -219,7 +221,7 @@ def _request_openai_responses(
     return _extract_output_text(response.json())
 
 
-def _request_siliconflow_chat(
+def _request_chat_completions(
     instructions: str, input_payload: dict[str, Any]
 ) -> str:
     body: dict[str, Any] = {
@@ -233,14 +235,20 @@ def _request_siliconflow_chat(
         ],
         "stream": False,
         "max_tokens": 96,
-        "enable_thinking": MODEL_ENABLE_THINKING == "true",
     }
+    if MODEL_PROVIDER == "siliconflow":
+        body["enable_thinking"] = MODEL_ENABLE_THINKING == "true"
+
+    headers = {
+        "Authorization": f"Bearer {MODEL_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    if MODEL_PROVIDER == "openrouter":
+        headers["X-OpenRouter-Title"] = "StackChan Tactile Bridge"
+
     response = requests.post(
         MODEL_API_URL,
-        headers={
-            "Authorization": f"Bearer {MODEL_API_KEY}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         json=body,
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
@@ -265,8 +273,8 @@ def _generate_reply(
         + "直接以第一人称回应她，只输出一句自然、亲密、具体的中文短句。"
         + f"最多 {MAX_REPLY_CHARS} 个字符，不要解释技术，不要加引号或说话人标签。"
     )
-    if MODEL_PROVIDER == "siliconflow":
-        text = _request_siliconflow_chat(instructions, input_payload)
+    if MODEL_PROVIDER in {"openrouter", "siliconflow"}:
+        text = _request_chat_completions(instructions, input_payload)
     else:
         text = _request_openai_responses(instructions, input_payload)
     return _trim_reply(text)

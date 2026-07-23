@@ -24,7 +24,7 @@ Mosquitto on VPS  <------------ StackChan on phone hotspot
                               |
                               | configured model API
                               v
-                    SiliconFlow / OpenAI model
+                 OpenRouter / SiliconFlow / OpenAI
 
 StackChan -- HTTP JPEG upload --> photo relay :18090
                                       |
@@ -49,8 +49,8 @@ StackChan -- HTTP JPEG upload --> photo relay :18090
 3. On release, the firmware classifies the gesture and queues a JSON event.
 4. The MCP service persists the event. It remains unread until explicitly acknowledged.
 5. The responder batches a short burst of touches, calls the configured model API
-   (SiliconFlow Chat Completions or OpenAI Responses), and publishes a concise
-   reply.
+   (OpenRouter or SiliconFlow Chat Completions, or OpenAI Responses), and
+   publishes a concise reply.
 6. StackChan displays the reply and later restores the last remotely commanded face.
 
 The persistent MCP path and immediate response path are deliberately independent.
